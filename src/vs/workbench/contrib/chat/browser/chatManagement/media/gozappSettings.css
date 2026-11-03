@@ -1,0 +1,16 @@
+.gozapp-settings { display: flex; overflow: hidden; background: var(--vscode-editor-background); color: var(--vscode-foreground); }
+.gozapp-settings nav { width: 210px; flex-shrink: 0; padding: 24px 16px; background: var(--vscode-sideBar-background); border-right: 1px solid var(--vscode-panel-border); overflow: auto; }
+.gozapp-settings main { flex: 1; min-width: 0; padding: 24px 36px; overflow: auto; }
+.gozapp-settings h1 { font-size: 24px; font-weight: 500; }
+.gozapp-settings h2 { font-size: 16px; font-weight: 500; }
+.gozapp-settings p { color: var(--vscode-descriptionForeground); line-height: 1.6; }
+.gozapp-settings .monaco-button { width: auto; margin: 10px 0; padding: 8px 12px; }
+.gozapp-card { background: var(--vscode-sideBar-background); border: 1px solid var(--vscode-panel-border); border-radius: 12px; padding: 8px 20px; }
+.gozapp-field { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 14px 0; border-bottom: 1px solid var(--vscode-panel-border); }
+.gozapp-field > span { flex: 1; }
+.gozapp-field .monaco-inputbox, .gozapp-field select { width: 52%; min-width: 100px; }
+.gozapp-field select { padding: 6px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border); }
+.gozapp-toggle { display: flex; align-items: center; gap: 12px; padding: 14px 0; cursor: pointer; }
+.gozapp-toggle input { accent-color: #69b87c; }
+.gozapp-providers { display: flex; flex-wrap: wrap; gap: 8px; }
+@media (max-width: 700px) { .gozapp-settings nav { width: 150px; padding: 12px; } .gozapp-settings main { padding: 16px; } .gozapp-field { flex-direction: column; align-items: stretch; gap: 8px; } .gozapp-field .monaco-inputbox, .gozapp-field select { width: 100%; } }
