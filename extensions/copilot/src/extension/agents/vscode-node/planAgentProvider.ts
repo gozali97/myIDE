@@ -218,6 +218,15 @@ Rules:
 			send: true
 		};
 
+		// Cursor-style "Save to workspace": a tracked, reviewable file instead of session memory only.
+		const saveToWorkspaceHandoff: AgentHandoff = {
+			label: 'Save to Workspace',
+			agent: 'agent',
+			prompt: 'Use #createFile to save the plan exactly as shown, without frontmatter, to `.gozapp/plans/plan-${camelCaseName}.md` in the workspace root. If that file already exists, add a numeric suffix instead of overwriting it. Do not create or edit any other file and do not start implementation. Reply with the saved path.',
+			showContinueOn: false,
+			send: true
+		};
+
 		// Collect tools to add
 		const toolsToAdd: string[] = [...additionalTools];
 
@@ -240,7 +249,7 @@ Rules:
 			// When explore agent is enabled, allow the Explore subagent
 			...(isExploreEnabled ? { agents: ['Explore'] } : {}),
 			tools,
-			handoffs: [startImplementationHandoff, openInEditorHandoff, ...(BASE_PLAN_AGENT_CONFIG.handoffs ?? [])],
+			handoffs: [startImplementationHandoff, openInEditorHandoff, saveToWorkspaceHandoff, ...(BASE_PLAN_AGENT_CONFIG.handoffs ?? [])],
 			body: PlanAgentProvider.buildAgentBody(isExploreEnabled, isSearchSubagentEnabled),
 			...(modelOverride ? { model: modelOverride } : {}),
 		};

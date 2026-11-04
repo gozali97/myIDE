@@ -3,6 +3,8 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { GozappEditPreview } from './gozappEditPreview.js';
+import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
 import { Codicon } from '../../../../../../base/common/codicons.js';
 import { Emitter, Event } from '../../../../../../base/common/event.js';
 import { ThemeIcon } from '../../../../../../base/common/themables.js';
@@ -55,6 +57,8 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 	get diffData(): IChatContentPartDiffData | undefined { return this._diffData; }
 
 	get domNode(): HTMLElement { return this.element; }
+	private readonly _onDidChangeHeight = this._register(new Emitter<void>());
+	readonly onDidChangeHeight = this._onDidChangeHeight.event;
 
 	constructor(
 		private readonly edit: IChatExternalEdit,
@@ -65,10 +69,18 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		@IHoverService hoverService: IHoverService,
 		@IEditorService private readonly editorService: IEditorService,
 		@ITextModelService private readonly textModelService: ITextModelService,
+		@IEditorWorkerService editorWorkerService: IEditorWorkerService,
 	) {
 		super(labelService, modelService, languageService, hoverService);
 
 		this.render(edit);
+		if ((edit.beforeContentUri && edit.afterContentUri)
+			|| (edit.editKind === 'create' && edit.afterContentUri)
+			|| (edit.editKind === 'delete' && edit.beforeContentUri)) {
+			const preview = this._register(new GozappEditPreview(() => this._onDidChangeHeight.fire(), textModelService, editorWorkerService));
+			this.element.append(preview.element);
+			void preview.render(edit.beforeContentUri, edit.afterContentUri);
+		}
 		this._register(this.onDidClick(opts => this.openEdit(opts)));
 	}
 
@@ -121,7 +133,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			// exist or was empty, there is nothing meaningful to diff against. Open the
 			// resulting file in a normal editor instead of a diff editor.
 			if (this.edit.editKind === 'edit' && (this.edit.diff?.removed ?? 0) === 0 && await isResourceContentEmpty(this.textModelService, this.edit.beforeContentUri)) {
-				this.editorService.openEditor({ resource: this.edit.uri, options }, group);
+				this.editorService.openEditor({ resource: this.edit.afterContentUri, options }, group);
 				return;
 			}
 			this.editorService.openEditor({
@@ -134,7 +146,7 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 			// content from the snapshot instead of opening the missing URI.
 			this.editorService.openEditor({ resource: this.edit.beforeContentUri, options }, group);
 		} else if (this.edit.editKind !== 'delete') {
-			this.editorService.openEditor({ resource: this.edit.uri, options }, group);
+			this.editorService.openEditor({ resource: this.edit.afterContentUri ?? this.edit.uri, options }, group);
 		}
 	}
 
@@ -144,7 +156,11 @@ export class ChatExternalEditContentPart extends ChatEditPillElement implements 
 		}
 		return (
 			other.subAgentInvocationId === this.edit.subAgentInvocationId &&
+			other.undoStopId === this.edit.undoStopId &&
+			isEqual(other.beforeContentUri, this.edit.beforeContentUri) &&
+			isEqual(other.afterContentUri, this.edit.afterContentUri) &&
 			isEqual(other.uri, this.edit.uri) &&
+			isEqual(other.originalUri, this.edit.originalUri) &&
 			other.editKind === this.edit.editKind &&
 			(other.diff?.added ?? 0) === (this.edit.diff?.added ?? 0) &&
 			(other.diff?.removed ?? 0) === (this.edit.diff?.removed ?? 0)

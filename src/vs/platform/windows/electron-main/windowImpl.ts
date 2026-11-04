@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { GozappSplashScreen } from './gozappSplashScreen.js';
 import electron, { BrowserWindowConstructorOptions, Display } from 'electron';
 import { DeferredPromise, RunOnceScheduler, timeout, Delayer } from '../../../base/common/async.js';
 import { CancellationToken } from '../../../base/common/cancellation.js';
@@ -800,16 +801,36 @@ export class CodeWindow extends BaseWindow implements ICodeWindow {
 			}
 			this._iconPath = iconPath ? URI.file(iconPath) : undefined;
 
+			const splash = new GozappSplashScreen(this.environmentMainService, this.logService);
+			splash.show();
+			const showAfterLoad = splash.shouldShow();
+			if (showAfterLoad) { options.show = false; }
+			this._register(toDisposable(() => splash.close()));
+
 			// Create the browser window
 			mark('code/willCreateCodeBrowserWindow');
 			this._win = new electron.BrowserWindow(options);
 			mark('code/didCreateCodeBrowserWindow');
 
+			let revealed = false;
+			const reveal = () => {
+				if (revealed || this._win.isDestroyed()) { splash.close(); return; }
+				revealed = true;
+				splash.close();
+				this.applyState(this.windowState, hasMultipleDisplays);
+				this._win.show();
+			};
+			if (showAfterLoad) {
+				this._win.once('ready-to-show', reveal);
+				const fallback = setTimeout(reveal, 8000);
+				this._register(toDisposable(() => clearTimeout(fallback)));
+			}
+
 			this._id = this._win.id;
 			this.setWin(this._win, options);
 
 			// Apply some state after window creation
-			this.applyState(this.windowState, hasMultipleDisplays);
+			if (!showAfterLoad) { this.applyState(this.windowState, hasMultipleDisplays); }
 
 			this._lastFocusTime = Date.now(); // since we show directly, we need to set the last focus time too
 		}

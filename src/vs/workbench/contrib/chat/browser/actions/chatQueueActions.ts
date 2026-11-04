@@ -180,9 +180,15 @@ export class ChatAskInSideChatAction extends Action2 {
 			title: localize2('chat.askInSideChat', "Ask in Side Chat"),
 			tooltip: localize('chat.askInSideChat.tooltip', "Ask this question in a side chat without adding it to this conversation"),
 			icon: Codicon.commentDiscussion,
-			f1: false,
+			f1: true,
 			category: CHAT_CATEGORY,
 			precondition: ContextKeyExpr.and(ChatContextKeys.inputHasText, ChatContextKeys.transcriptProgressActive.negate()),
+			menu: [{
+				id: MenuId.ChatInput,
+				group: 'navigation',
+				order: 30,
+				when: ContextKeyExpr.and(ChatContextKeys.inputHasText, ChatContextKeys.transcriptProgressActive.negate()),
+			}],
 		});
 	}
 

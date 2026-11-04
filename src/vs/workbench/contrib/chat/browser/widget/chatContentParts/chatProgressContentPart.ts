@@ -482,18 +482,18 @@ export class ChatWorkingProgressContentPart extends ChatProgressContentPart impl
 		this.updateDelayedProgressMessageScheduler();
 		this.updateImageGenerationMessageScheduler();
 
-		if (isResponseVM(context.element)) {
-			const activity = append(this.domNode, $('span.gozapp-activity-age'));
-			activity.style.display = 'block';
-			activity.style.fontSize = '11px';
-			activity.style.opacity = '0.8';
+		// The native working footer already tracks activity and prolonged inactivity.
+		if (!this.workingLogo && isResponseVM(context.element)) {
+			const activity = this.domNode;
 			// Response events are observable evidence, not proof that a remote model is healthy.
 			let lastEvent = Date.now();
+			let renderedSeconds = -1;
 			const refresh = () => {
-				activity.hidden = this.responseComplete;
-				if (this.responseComplete) { return; }
+				if (this.responseComplete) { activity.title = ''; clearInterval(timer); return; }
 				const age = getGozappActivityAge(Date.now(), lastEvent);
-				activity.textContent = age.quiet
+				if (age.seconds === renderedSeconds) { return; }
+				renderedSeconds = age.seconds;
+				activity.title = age.quiet
 					? localize('gozapp.activity.quiet', "No response updates for {0}s. Check pending approvals or expand the active tool/subagent; Stop cancels the request.", age.seconds)
 					: localize('gozapp.activity.recent', "Last response update: {0}s ago", age.seconds);
 			};

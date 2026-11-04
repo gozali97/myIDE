@@ -73,6 +73,36 @@ suite('SSEProcessor', () => {
 		assert.deepStrictEqual(simplifiedActual, splifiedExpected);
 	}
 
+	test('reads complete message content in SSE without duplicating streamed prefixes', async () => {
+		for (const deltas of [[], [{ content: 'console.' }]]) {
+			const chunks = [
+				...deltas.map(delta => ({ choices: [{ index: 0, delta }] })),
+				{ choices: [{ index: 0, message: { content: 'console.log(value);' }, finish_reason: 'stop' }] },
+			];
+			const response = chunks.map(chunk => `data: ${JSON.stringify(chunk)}\n\n`).join('') + 'data: [DONE]\n\n';
+			const processor = await SSEProcessor.create(logService, telemetryService, 1, createFakeStreamResponse(response));
+			const spy = createSpyingFinishedCb();
+			const results = await getAll(processor.processSSE(spy.finishedCb));
+			expect(results[0].solution.text.join('')).toBe('console.log(value);');
+			expect(spy.collection.map(part => part.delta.text ?? '').join('')).toBe('console.log(value);');
+		}
+	});
+
+	test('empty SSE diagnostic excludes response text', async () => {
+		const warning = vi.spyOn(logService, 'warn');
+		try {
+			const response = 'data: ' + JSON.stringify({ choices: [{ index: 0, delta: { reasoning_content: 'PRIVATE_RESPONSE' }, finish_reason: 'stop' }] }) + '\n\ndata: [DONE]\n\n';
+			const processor = await SSEProcessor.create(logService, telemetryService, 1, createFakeStreamResponse(response));
+			await getAll(processor.processSSE());
+			const diagnostic = warning.mock.calls.find(call => String(call[0]).includes('[LM empty SSE]'));
+			expect(diagnostic).toBeDefined();
+			expect(String(diagnostic?.[0])).not.toContain('PRIVATE_RESPONSE');
+			expect(String(diagnostic?.[0])).toContain('thinkingFound');
+		} finally {
+			warning.mockRestore();
+		}
+	});
+
 	test('empty response yields no results', async function () {
 		const processor = await SSEProcessor.create(
 			logService,

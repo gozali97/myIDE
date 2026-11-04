@@ -1,0 +1,11 @@
+src/vs/workbench/contrib/chat/test/browser/chatEditing/chatEditingCheckpointTimeline.test.ts
+src/vs/workbench/contrib/chat/test/browser/chatEditing/chatEditingActions.test.ts
+src/vs/workbench/contrib/chat/test/browser/chatEditing/chatEditingEditorActions.test.ts
+src/vs/workbench/contrib/chat/test/browser/chatEditing/chatEditingService.test.ts
+src/vs/workbench/contrib/chat/test/browser/chatEditing/chatEditingSessionStorage.test.ts
+src/vs/workbench/contrib/chat/test/browser/widget/chatRestoreCheckpointActionViewItem.test.ts
+src/vs/workbench/contrib/chat/test/browser/agentHost/agentHostEditReview.test.ts
+src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/gozappEditPreview.test.ts
+src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/chatExternalEditIdentity.test.ts
+src/vs/workbench/contrib/chat/test/browser/widget/chatContentParts/gozappEditSnapshot.test.ts
+src/vs/workbench/contrib/chat/test/browser/widget/chatListRenderer.test.ts

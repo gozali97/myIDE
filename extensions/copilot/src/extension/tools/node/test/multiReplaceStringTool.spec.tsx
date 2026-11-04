@@ -16,6 +16,9 @@ import { ResourceMap } from '../../../../util/vs/base/common/map';
 import { URI } from '../../../../util/vs/base/common/uri';
 import { SyncDescriptor } from '../../../../util/vs/platform/instantiation/common/descriptors';
 import { ChatResponseTextEditPart, Range } from '../../../../vscodeTypes';
+import { TokenizerType } from '../../../../util/common/tokenizer';
+import { IEndpointProvider } from '../../../../platform/endpoint/common/endpointProvider';
+import { createMockEndpointProvider } from './searchToolTestUtils';
 import { createExtensionUnitTestingServices } from '../../../test/node/services';
 import { ToolName } from '../../common/toolNames';
 import { CopilotToolMode } from '../../common/toolsRegistry';
@@ -43,6 +46,12 @@ suite('MultiReplaceString', () => {
 		}
 
 		const services = createExtensionUnitTestingServices();
+		const endpoints = createMockEndpointProvider('test-model');
+		const getEndpoint = endpoints.getChatEndpoint.bind(endpoints);
+		endpoints.getChatEndpoint = async (...args) => Object.assign(await getEndpoint(...args), {
+			tokenizer: TokenizerType.O200K, modelMaxPromptTokens: 32000,
+		});
+		services.define(IEndpointProvider, endpoints);
 		services.define(IWorkspaceService, new SyncDescriptor(
 			TestWorkspaceService,
 			[

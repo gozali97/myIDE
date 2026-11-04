@@ -252,16 +252,23 @@ function createCopilotSetupStep(id: string, button: string, when: string, includ
 export const walkthroughs: GettingStartedWalkthroughContent = [
 	{
 		id: 'Setup',
-		title: localize('gettingStarted.setup.title', "Get started with VS Code"),
+		title: localize('gettingStarted.setup.title', "Get started with Gozapp"),
 		description: localize('gettingStarted.setup.description', "Customize your editor, learn the basics, and start coding"),
 		isFeatured: true,
 		icon: setupIcon,
 		when: '!isWeb',
-		walkthroughPageTitle: localize('gettingStarted.setup.walkthroughPageTitle', 'Setup VS Code'),
+		walkthroughPageTitle: localize('gettingStarted.setup.walkthroughPageTitle', 'Set up Gozapp'),
 		next: 'Beginner',
 		content: {
 			type: 'steps',
 			steps: [
+				{
+					id: 'gozappModels',
+					title: localize('gettingStarted.gozappModels.title', 'Connect your own AI provider'),
+					description: localize('gettingStarted.gozappModels.description', 'Open Gozapp Settings to configure your endpoint, API key and models. Set token limits per model and enable tool calling only when supported. API usage may be billed by your provider.\n{0}', Button(localize('gettingStarted.gozappSettings', 'Open Gozapp Settings'), 'command:workbench.action.gozappSettings')),
+					completionEvents: ['onCommand:workbench.action.gozappSettings'],
+					media: { type: 'svg', altText: 'Editor settings illustration', path: 'settings.svg' },
+				},
 				createCopilotSetupStep('CopilotSetupAnonymous', CopilotAnonymousButton, 'chatAnonymous && !chatSetupCompleted', true),
 				createCopilotSetupStep('CopilotSetupSignedOut', CopilotSignedOutButton, 'chatEntitlementSignedOut && !chatAnonymous && !github.copilot.hasByokModels', false),
 				createCopilotSetupStep('CopilotSetupComplete', CopilotCompleteButton, 'chatSetupCompleted && !chatSetupDisabled && (chatAnonymous || chatPlanPro || chatPlanProPlus || chatPlanMax || chatPlanBusiness || chatPlanEnterprise || chatPlanFree)', false),

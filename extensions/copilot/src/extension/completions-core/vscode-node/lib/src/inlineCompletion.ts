@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { workspace, window } from 'vscode';
 import { CancellationToken, Position, Range } from 'vscode-languageserver-protocol';
 import { ILogger } from '../../../../../platform/log/common/logService';
 import { IInstantiationService } from '../../../../../util/vs/platform/instantiation/common/instantiation';
@@ -42,6 +43,7 @@ export class GhostText {
 		logCompletionLocation(this.logTargetService, textDocument, position);
 
 		const result = await this.getInlineCompletionsResult(createCompletionState(textDocument, position), token, options, logContext, telemetryBuilder, parentLogger);
+		parentLogger.info(`[Gozapp inline pipeline] status=${result.type}, cancelled=${token.isCancellationRequested}, ${result.type === 'success' ? `items=${result.value.length}` : `reason=${result.reason}`}`);
 		return this.instantiationService.invokeFunction(handleGhostTextResultTelemetry, result);
 	}
 
@@ -95,7 +97,7 @@ export class GhostText {
 		}
 
 		// Speculatively request a new completion including the newly returned completion in the document
-		if (resultType !== ResultType.TypingAsSuggested) {
+		if (resultType !== ResultType.TypingAsSuggested && !workspace.getConfiguration('gozapp.autocomplete', window.activeTextEditor?.document.uri).get<boolean>('enabled', false)) {
 			completionState = completionState.applyEdits([
 				{
 					newText: completions[0].insertText,

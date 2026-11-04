@@ -4,6 +4,9 @@
  *--------------------------------------------------------------------------------------------*/
 
 import * as dom from '../../../../../../base/browser/dom.js';
+import { GozappEditPreview } from './gozappEditPreview.js';
+import { RunOnceScheduler } from '../../../../../../base/common/async.js';
+import { IEditorWorkerService } from '../../../../../../editor/common/services/editorWorker.js';
 import { allowedMarkdownHtmlAttributes, MarkdownRendererMarkedOptions, type MarkdownRenderOptions } from '../../../../../../base/browser/markdownRenderer.js';
 import { status } from '../../../../../../base/browser/ui/aria/aria.js';
 import { DomScrollableElement } from '../../../../../../base/browser/ui/scrollbar/scrollableElement.js';
@@ -535,6 +538,7 @@ export class ChatMarkdownContentPart extends Disposable implements IChatContentP
 		// already has finalized diff data (e.g. on session restore).
 		this.allRefs.push(ref);
 		diffListenerStore.add(codeBlock.onDidChangeDiff(() => this.fireAggregatedDiff()));
+		diffListenerStore.add(codeBlock.onDidChangePreviewHeight(() => this._onDidChangeHeight.fire()));
 		codeBlock.render(codemapperUri);
 		return ref;
 	}
@@ -921,6 +925,13 @@ class ChatOutputCodeBlockPart extends Disposable {
 export class CollapsedCodeBlock extends ChatEditPillElement {
 
 	private currentDiff: IEditSessionEntryDiff | undefined;
+	private readonly preview: GozappEditPreview;
+	private readonly previewScheduler = this._register(new RunOnceScheduler(() => {
+		const diff = this.currentDiff;
+		if (diff) { void this.preview.render(diff.originalURI, diff.modifiedSnapshotURI ?? diff.modifiedURI); }
+	}, 300));
+	private readonly _onDidChangePreviewHeight = this._register(new Emitter<void>());
+	readonly onDidChangePreviewHeight = this._onDidChangePreviewHeight.event;
 	get diff(): IEditSessionEntryDiff | undefined {
 		return this.currentDiff;
 	}
@@ -945,8 +956,12 @@ export class CollapsedCodeBlock extends ChatEditPillElement {
 		@IChatService private readonly chatService: IChatService,
 		@IConfigurationService private readonly configurationService: IConfigurationService,
 		@ITextModelService private readonly textModelService: ITextModelService,
+		@IEditorWorkerService editorWorkerService: IEditorWorkerService,
 	) {
 		super(labelService, modelService, languageService, hoverService);
+		this.preview = this._register(new GozappEditPreview(() => this._onDidChangePreviewHeight.fire(), textModelService, editorWorkerService));
+		this.element.style.flexWrap = 'wrap';
+		this.element.append(this.preview.element);
 
 		this._register(this.onDidClick(e => this.showDiff(e)));
 		this._register(this.onDidContextMenu(event => {
@@ -974,16 +989,20 @@ export class CollapsedCodeBlock extends ChatEditPillElement {
 	private async showDiff({ editorOptions: options, openToSide }: IOpenEditorOptions): Promise<void> {
 		const group = openToSide ? SIDE_GROUP : undefined;
 		if (this.currentDiff) {
+			if (this.currentDiff.isDeleted) {
+				this.editorService.openEditor({ resource: this.currentDiff.originalURI, options }, group);
+				return;
+			}
 			// If the change is a pure addition into a file whose original version did not
 			// exist or was empty, there is nothing meaningful to diff against. Open the
 			// file in a normal editor instead of a diff editor.
 			if (this.currentDiff.removed === 0 && await isResourceContentEmpty(this.textModelService, this.currentDiff.originalURI) && this.uri) {
-				this.editorService.openEditor({ resource: this.uri, options }, group);
+				this.editorService.openEditor({ resource: this.currentDiff.modifiedSnapshotURI ?? this.uri, options }, group);
 				return;
 			}
 			this.editorService.openEditor({
 				original: { resource: this.currentDiff.originalURI },
-				modified: { resource: this.currentDiff.modifiedURI },
+				modified: { resource: this.currentDiff.modifiedSnapshotURI ?? this.currentDiff.modifiedURI },
 				options
 			}, group);
 		} else if (this.uri) {
@@ -996,6 +1015,9 @@ export class CollapsedCodeBlock extends ChatEditPillElement {
 	 */
 	render(uri: URI): void {
 		this.progressStore.clear();
+		this.previewScheduler.cancel();
+		this.preview.clear();
+		this.currentDiff = undefined;
 
 		this.setUri(uri);
 		this.setStatus(undefined, '');
@@ -1052,6 +1074,7 @@ export class CollapsedCodeBlock extends ChatEditPillElement {
 
 			if (changes && !changes?.identical && !changes?.quitEarly) {
 				this.currentDiff = changes;
+				if (!this.previewScheduler.isScheduled()) { this.previewScheduler.schedule(); }
 				this._onDidChangeDiff.fire(changes);
 				this.setDiff({ added: changes.added, removed: changes.removed });
 				const insertionsFragment = changes.added === 1 ? localize('chat.codeblock.insertions.one', "1 insertion") : localize('chat.codeblock.insertions', "{0} insertions", changes.added);

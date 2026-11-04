@@ -108,6 +108,7 @@ export class GhostTextProvider {
 			} satisfies GhostTextCompletionItem;
 		});
 
+		logger.info(`[Gozapp inline pipeline] returningItems=${items.length}, cancelled=${token.isCancellationRequested}`);
 		return { items, telemetryBuilder } satisfies GhostTextCompletionList;
 	}
 

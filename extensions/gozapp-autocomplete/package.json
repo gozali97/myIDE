@@ -1,0 +1,21 @@
+{
+  "name": "gozapp-autocomplete",
+  "displayName": "Gozapp AI Autocomplete",
+  "publisher": "gozapp",
+  "version": "0.1.0",
+  "engines": { "vscode": "^1.120.0" },
+  "main": "./extension.js",
+  "activationEvents": ["onStartupFinished", "onCommand:gozapp.autocomplete.completeNative"],
+  "capabilities": { "untrustedWorkspaces": { "supported": false } },
+  "contributes": {
+    "commands": [{ "command": "gozapp.autocomplete.selectModel", "title": "Gozapp: Configure AI Autocomplete Model" }],
+    "configuration": {
+      "title": "Gozapp AI Autocomplete",
+      "properties": {
+        "gozapp.autocomplete.enabled": { "type": "boolean", "default": false, "description": "Use native Copilot autocomplete with the selected provider for bounded inline suggestions. May incur provider API charges. No fallback to Copilot requests; native next-edit suggestions are disabled while enabled." },
+        "gozapp.autocomplete.model": { "type": "string", "default": "", "description": "Model ID selected using Gozapp: Configure AI Autocomplete Model. No automatic fallback to another provider." },
+        "gozapp.autocomplete.delay": { "type": "number", "default": 2000, "minimum": 2000, "maximum": 10000, "description": "Typing idle delay before an autocomplete request, in milliseconds (at least 2 seconds). Typing restarts the idle wait; existing matching suggestions are reused without a new request." }
+      }
+    }
+  }
+}

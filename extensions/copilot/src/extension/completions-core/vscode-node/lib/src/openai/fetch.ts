@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import { commands, workspace, window } from 'vscode';
 import { IAuthenticationService } from '../../../../../../platform/authentication/common/authentication';
 import { CopilotAnnotations, StreamCopilotAnnotations } from '../../../../../../platform/completions-core/common/openai/copilotAnnotations';
 import { IEnvService } from '../../../../../../platform/env/common/envService';
@@ -349,6 +350,34 @@ export class LiveOpenAIFetcher extends OpenAIFetcher {
 		finishedCb: FinishedCallback,
 		cancel?: ICancellationToken
 	): Promise<CompletionResults | CompletionError> {
+		const resource = window.activeTextEditor?.document.uri;
+		if (workspace.getConfiguration('gozapp.autocomplete', resource).get<boolean>('enabled', false)) {
+			try {
+				const text = await commands.executeCommand<string>('gozapp.autocomplete.completeNative', params.prompt.prefix, params.prompt.suffix, params.languageId, cancel);
+				if (cancel?.isCancellationRequested) { return { type: 'canceled', reason: 'BYOK cancelled' }; }
+				const choice: APIChoice = {
+					completionText: typeof text === 'string' ? text : '',
+					meanLogProb: undefined, meanAlternativeLogProb: undefined,
+					choiceIndex: 0,
+					requestId: { headerRequestId: params.ourRequestId, gitHubRequestId: '', copilotServiceRequestId: '', serverExperiments: '', completionId: params.ourRequestId, created: Date.now(), deploymentId: '' },
+					tokens: [], numTokens: 0, blockFinished: false,
+					telemetryData: baseTelemetryData, clientCompletionId: generateUuid(), finishReason: 'stop',
+				};
+				if (choice.completionText) {
+					// Native async matching needs the callback, not only the final choice.
+					const decision = await finishedCb(choice.completionText, { text: choice.completionText, index: 0, requestId: choice.requestId, finished: true, telemetryData: baseTelemetryData });
+					const finishOffset = typeof decision === 'number' ? decision : decision?.finishOffset;
+					logger.info(this.logTargetService, `[Gozapp native adapter] received=${choice.completionText.length}, finishOffset=${finishOffset ?? 'none'}, cancelled=${cancel?.isCancellationRequested ?? false}`);
+					if (finishOffset !== undefined) {
+						choice.completionText = choice.completionText.slice(0, finishOffset);
+						choice.blockFinished = true;
+					}
+				}
+				return { type: 'success', choices: (async function* () { if (choice.completionText) { yield choice; } })(), getProcessingTime: () => 0 };
+			} catch {
+				return { type: 'failed', reason: 'BYOK transport unavailable; no Copilot fallback' };
+			}
+		}
 		if (this.#disabledReason) {
 			return { type: 'canceled', reason: this.#disabledReason };
 		}

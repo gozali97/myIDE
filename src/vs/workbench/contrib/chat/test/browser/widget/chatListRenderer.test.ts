@@ -8497,7 +8497,9 @@ suite('ChatListRenderer', () => {
 						configurationService.setUserConfiguration(ChatConfiguration.PersistentProgress, animation);
 						renderer.renderElement(node, 0, template);
 						await new Promise<void>(resolve => mainWindow.requestAnimationFrame(() => resolve()));
-						template.completedResponseDisclosure?.querySelector<HTMLElement>('summary')?.click();
+						if (template.completedResponseDisclosure && !template.completedResponseDisclosure.open) {
+							template.completedResponseDisclosure.querySelector<HTMLElement>('summary')?.click();
+						}
 						if (animation === ChatProgressAnimation.Off) {
 							for (const button of template.value.querySelectorAll<HTMLElement>('.chat-thinking-box.chat-used-context-collapsed > .chat-used-context-label .monaco-button')) {
 								button.click();
@@ -8680,7 +8682,7 @@ suite('ChatListRenderer', () => {
 					counts: stats ? [...stats.children].map(child => child.textContent) : undefined,
 					accessibleCounts: stats?.ariaLabel,
 					summaryIncludesCounts: summary.ariaLabel?.includes('11 lines added, 6 lines deleted') ?? false,
-					remainsCollapsed: !disclosure.open,
+					editHistoryOpen: disclosure.open,
 					disclosureToggles,
 					opened: opened.map(editor => ({
 						label: editor.label,
@@ -8694,7 +8696,7 @@ suite('ChatListRenderer', () => {
 					counts: persistent ? ['+11', '-6'] : undefined,
 					accessibleCounts: persistent ? 'View file changes, 11 lines added, 6 lines deleted' : undefined,
 					summaryIncludesCounts: persistent,
-					remainsCollapsed: true,
+					editHistoryOpen: true,
 					disclosureToggles: 0,
 					opened: persistent ? [{
 						label: 'Response File Changes',
@@ -8704,6 +8706,12 @@ suite('ChatListRenderer', () => {
 						],
 					}] : [],
 				});
+				// Review actions must not fold history; an explicit user toggle still may.
+				summary.click();
+				assert.strictEqual(disclosure.open, false);
+				assert.strictEqual(disclosureToggles, 1);
+				renderer.renderElement(node, 0, template);
+				assert.strictEqual(template.completedResponseDisclosure?.open, false, 'Manual collapse survives rerender');
 			});
 		}
 	}
@@ -14604,8 +14612,7 @@ suite('ChatListRenderer', () => {
 	// measured synchronously *during* the render pass must be deferred (not fired re-entrantly and
 	// not stored), then reliably delivered to the tree afterwards via a re-measure — so streamed
 	// content can't get stranded below a stale row height until a window resize.
-	// skipped for https://github.com/microsoft/vscode/issues/327402
-	test.skip('fireItemHeightChange defers a mid-render measurement and delivers it after the render pass', async () => {
+	test('fireItemHeightChange defers a mid-render measurement and delivers it after the render pass', async () => {
 		const disposables = store.add(new DisposableStore());
 		const instantiationService = workbenchInstantiationService(undefined, disposables);
 		const configurationService = new TestConfigurationService();

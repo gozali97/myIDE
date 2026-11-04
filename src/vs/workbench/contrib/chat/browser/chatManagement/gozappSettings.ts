@@ -31,6 +31,17 @@ import { EditorInput } from '../../../../common/editor/editorInput.js';
 import { IEditorGroup } from '../../../../services/editor/common/editorGroupsService.js';
 import { IEditorService } from '../../../../services/editor/common/editorService.js';
 import { ILanguageModelsConfigurationService, ILanguageModelsProviderGroup } from '../../common/languageModelsConfiguration.js';
+import { GOZAPP_DEBUG_PROMPT } from '../../common/gozappDebugPrompt.js';
+import { BrowserViewCommandId } from '../../../../../platform/browserView/common/browserView.js';
+import { validateGozappBrowserUrl } from '../../common/gozappBrowserUrl.js';
+import { ChatConfiguration } from '../../common/constants.js';
+import { AICustomizationManagementCommands, AICustomizationManagementSection } from '../../common/aiCustomizationWorkspaceService.js';
+import { McpCommandIds } from '../../../../contrib/mcp/common/mcpCommandIds.js';
+import { CancellationTokenSource } from '../../../../../base/common/cancellation.js';
+import { toDisposable } from '../../../../../base/common/lifecycle.js';
+import { IDialogService } from '../../../../../platform/dialogs/common/dialogs.js';
+import { consumeGozappProbe } from '../../common/gozappModelProbe.js';
+import { ILanguageModelsService, ILanguageModelChatMetadata, ChatMessageRole, canHideModel } from '../../common/languageModels.js';
 import { buildGozappModelGroup, isValidGozappModelId } from '../../common/gozappModelConfig.js';
 
 class GozappSettingsInput extends EditorInput {
@@ -53,12 +64,14 @@ class GozappSettingsEditor extends EditorPane {
 		@IThemeService theme: IThemeService,
 		@IStorageService storage: IStorageService,
 		@ILanguageModelsConfigurationService private readonly models: ILanguageModelsConfigurationService,
+		@ILanguageModelsService private readonly languageModels: ILanguageModelsService,
 		@ISecretStorageService private readonly secrets: ISecretStorageService,
 		@ICommandService private readonly commands: ICommandService,
 		@IConfigurationService private readonly configuration: IConfigurationService,
 		@IFileService private readonly files: IFileService,
 		@IUserDataProfileService private readonly profile: IUserDataProfileService,
 		@IEditorService private readonly editors: IEditorService,
+		@IDialogService private readonly dialogs: IDialogService,
 	) { super(GozappSettingsEditor.ID, group, telemetry, theme, storage); }
 
 	protected override createEditor(parent: HTMLElement): void {
@@ -68,8 +81,13 @@ class GozappSettingsEditor extends EditorPane {
 		DOM.append(nav, DOM.$('h2', undefined, 'Gozapp'));
 		DOM.append(nav, DOM.$('p', undefined, 'Your editor. Your models.'));
 		this.content = DOM.append(this.root, DOM.$('main'));
+		this.button(nav, 'General & Layout', () => this.showGeneral(), this._store);
 		this.button(nav, 'Models & API Keys', () => this.showModels(), this._store);
 		this.button(nav, 'Agents & Chat', () => this.showAgents(), this._store);
+		this.button(nav, 'Customize · Rules / Skills / MCP', () => this.showCustomize(), this._store);
+		this.button(nav, 'Worktrees', () => this.showWorktrees(), this._store);
+		this.button(nav, 'Debug Workflow', () => this.showDebug(), this._store);
+		this.button(nav, 'Browser Testing', () => this.showBrowser(), this._store);
 		this.button(nav, 'Editor Settings ↗', () => this.commands.executeCommand('workbench.action.openSettings'), this._store);
 		void this.models.whenReady.then(() => { if (!this._store.isDisposed) { this.showModels(); } });
 	}
@@ -96,8 +114,189 @@ class GozappSettingsEditor extends EditorPane {
 		DOM.append(this.content, DOM.$('p', undefined, description));
 	}
 
+	private showWorktrees(): void {
+		this.heading('Worktrees', 'Use a separate Git working directory for each independent task. Opening this page does not create branches, move changes or start agents.');
+		DOM.append(this.content, DOM.$('p', undefined, 'Open a Git repository first. Create a worktree using the Git prompts, then open it in a new window and start a separate Agent session there. Review and merge each branch through your normal Git workflow.'));
+		const status = DOM.append(this.content, DOM.$('p', { role: 'status' }));
+		for (const [label, command] of [
+			['Create Git worktree…', 'git.createWorktree'],
+			['Open worktree in new window…', 'git.openWorktreeInNewWindow'],
+		] as const) {
+			const button = this.button(this.content, label, async () => {
+				button.enabled = false;
+				status.textContent = 'Follow the Git prompts to select the repository, branch and location. Cancelling leaves the operation unfinished.';
+				try {
+					await this.commands.executeCommand(command);
+					status.textContent = 'Git workflow closed. Check Source Control for the resulting worktree; the operation may have been cancelled.';
+				} catch {
+					status.textContent = 'Unable to complete the Git worktree workflow. Ensure Git is installed, the built-in Git extension is enabled and a repository is open. Inspect Git Output for details.';
+				} finally { button.enabled = true; }
+			});
+		}
+		DOM.append(this.content, DOM.$('p', undefined, 'Worktrees isolate files and branches, not your operating system. Agents still share credentials, network access, ports and external services. Use separate test data/ports; never assume worktrees are security sandboxes.'));
+		DOM.append(this.content, DOM.$('p', undefined, 'Uncommitted changes do not automatically move to a new worktree. Dependencies and local configuration may need setup. No automatic merge, deletion, cleanup or parallel-agent orchestration is implemented here.'));
+	}
+
+	private showGeneral(): void {
+		this.heading('General & Layout', 'Personalize Gozapp. Changes apply immediately to your user settings; workspace or policy overrides may take precedence.');
+		const status = DOM.append(this.content, DOM.$('p', { role: 'status' }));
+		for (const setting of [
+			{ key: 'workbench.activityBar.location', label: 'Navigation icons', options: [['top', 'Top of sidebar'], ['default', 'Side of sidebar'], ['bottom', 'Bottom of sidebar'], ['hidden', 'Hidden']] },
+			{ key: 'workbench.statusBar.visible', label: 'Status bar', options: [['true', 'Visible'], ['false', 'Hidden']] },
+			{ key: 'window.commandCenter', label: 'Command center in title bar', options: [['true', 'Visible'], ['false', 'Hidden']] },
+		] as const) {
+			const row = DOM.append(this.content, DOM.$('label.gozapp-field'));
+			DOM.append(row, DOM.$('span', undefined, setting.label));
+			const select = DOM.append(row, DOM.$<HTMLSelectElement>('select'));
+			for (const [value, label] of setting.options) { DOM.append(select, DOM.$('option', { value }, label)); }
+			const refresh = () => { select.value = String(this.configuration.getValue(setting.key)); };
+			refresh();
+			this.page.add(this.configuration.onDidChangeConfiguration(event => {
+				if (event.affectsConfiguration(setting.key)) { refresh(); }
+			}));
+			this.page.add(DOM.addDisposableListener(select, 'change', async () => {
+				const requested = select.value;
+				const value = requested === 'true' ? true : requested === 'false' ? false : requested;
+				select.disabled = true;
+				try {
+					await this.configuration.updateValue(setting.key, value, ConfigurationTarget.USER);
+					refresh();
+					status.textContent = select.value === requested ? 'Layout preference saved.' : 'User preference saved, but another scope or policy overrides it.';
+				} catch { refresh(); status.textContent = 'Unable to save the layout preference.'; }
+				finally { select.disabled = false; }
+			}));
+		}
+		DOM.append(this.content, DOM.$('p', undefined, 'If navigation icons are hidden, return through the Gozapp Settings title-bar button or Command Palette to restore them.'));
+	}
+
+	private showDebug(): void {
+		this.heading('Debug Workflow', 'Evidence-first debugging: reproduce, investigate, fix, and verify. This is a reusable prompt, not automatic runtime instrumentation.');
+		DOM.append(this.content, DOM.$('p', undefined, 'Create the prompt below, then type /gozapp-debug in Chat and describe the bug. The selected model and normal tool permissions apply. Requests may use billed API tokens.'));
+		const status = DOM.append(this.content, DOM.$('p', { role: 'status' }));
+		this.button(this.content, 'Create / edit Debug prompt', async () => {
+			try {
+				const home = this.profile.currentProfile.promptsHome;
+				const resource = URI.joinPath(home, 'gozapp-debug.prompt.md');
+				if (!await this.files.exists(resource)) {
+					await this.files.createFolder(home);
+					await this.files.createFile(resource, VSBuffer.fromString(GOZAPP_DEBUG_PROMPT), { overwrite: false });
+				}
+				await this.editors.openEditor({ resource });
+				status.textContent = 'Prompt ready. Existing customizations were preserved. Use /gozapp-debug in Chat; no request has been sent.';
+			} catch { status.textContent = 'Unable to create/open the Debug prompt. Existing files were not overwritten.'; }
+		});
+		this.button(this.content, 'Open Chat', async () => {
+			try { await this.commands.executeCommand('workbench.action.chat.open'); }
+			catch { status.textContent = 'Unable to open Chat.'; }
+		});
+		DOM.append(this.content, DOM.$('p', undefined, 'Include expected behavior, actual behavior, reproduction steps and a sanitized error. Do not include credentials. Agent should explain any temporary logging and remove only instrumentation it introduced.'));
+	}
+
+	private showBrowser(): void {
+		this.heading('Browser Testing', 'Open your running app in the integrated browser. This does not start a development server or automatically share the page with Agent.');
+		const url = this.field(this.content, 'Application URL', 'http://localhost:3000');
+		const status = DOM.append(this.content, DOM.$('p', { role: 'status' }));
+		const browserToolsKey = 'workbench.browser.enableChatTools';
+		const toolsRow = DOM.append(this.content, DOM.$('label.gozapp-field'));
+		DOM.append(toolsRow, DOM.$('span', undefined, 'Agent browser testing tools'));
+		const tools = DOM.append(toolsRow, DOM.$<HTMLSelectElement>('select'));
+		DOM.append(tools, DOM.$('option', { value: 'false' }, 'Off — no built-in browser interaction'));
+		DOM.append(tools, DOM.$('option', { value: 'true' }, 'On — allow browser tools with existing permissions'));
+		const refreshTools = () => { tools.value = String(this.configuration.getValue<boolean>(browserToolsKey)); };
+		refreshTools();
+		this.page.add(this.configuration.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration(browserToolsKey)) { refreshTools(); }
+		}));
+		this.page.add(DOM.addDisposableListener(tools, 'change', async () => {
+			const requested = tools.value;
+			tools.disabled = true;
+			try {
+				await this.configuration.updateValue(browserToolsKey, requested === 'true', ConfigurationTarget.USER);
+				refreshTools();
+				status.textContent = tools.value === requested
+					? 'Browser tool preference saved. Start a new request to use the updated tool selection; this does not cancel a running tool.'
+					: 'User preference saved, but a workspace setting or policy overrides it.';
+			} catch { refreshTools(); status.textContent = 'Unable to save browser tool preference.'; }
+			finally { tools.disabled = false; }
+		}));
+		DOM.append(this.content, DOM.$('p', undefined, 'Off disables built-in agent browser interaction, not manual browser tabs, terminal commands, or browser tools from MCP/extensions. Disable those separately in Customize → MCP / tool selection.'));
+		this.button(this.content, 'Open application in Gozapp', async () => {
+			let target: string;
+			try { target = validateGozappBrowserUrl(url.value); }
+			catch { status.textContent = 'Enter a full HTTP/HTTPS URL without embedded credentials, for example http://localhost:3000.'; return; }
+			try {
+				await this.commands.executeCommand(BrowserViewCommandId.Open, { url: target, openToSide: true });
+				status.textContent = 'Browser opened. Check the page for connection errors; opening a tab does not prove the application loaded successfully.';
+			} catch { status.textContent = 'Unable to open the integrated browser. This feature requires a supported desktop window.'; }
+		});
+		this.button(this.content, 'Configure Agent browser tools', async () => {
+			try { await this.commands.executeCommand('workbench.action.openSettings', 'workbench.browser.enableChatTools'); }
+			catch { status.textContent = 'Unable to open browser tool settings.'; }
+		});
+		DOM.append(this.content, DOM.$('p', undefined, 'Workflow: start your app, open its URL, enable browser tools if needed, then ask Agent to inspect or test it. Approve sharing only the intended tab. Screenshots need a vision-capable model. Availability also depends on workspace policy and the active agent.'));
+		DOM.append(this.content, DOM.$('p', undefined, 'Browser tools can read page content and interact with signed-in services. Review clicks, submissions and scripts; use test accounts and avoid exposing secrets. Existing confirmation and network restrictions remain enabled.'));
+	}
+
+	private showCustomize(): void {
+		this.heading('Customize', 'Manage the instructions and tools available to your agent. Opens the built-in manager for the selected category.');
+		const feedback = DOM.append(this.content, DOM.$('p', { role: 'status' }));
+		const run = async (command: string, ...args: unknown[]) => {
+			try {
+				feedback.textContent = 'Opening…';
+				await this.commands.executeCommand(command, ...args);
+				feedback.textContent = '';
+			} catch {
+				feedback.textContent = 'Unable to open this manager. Check that AI features are enabled and inspect Output for details.';
+			}
+		};
+		for (const [label, section, description] of [
+			['Rules / Instructions', AICustomizationManagementSection.Instructions, 'Project and personal coding guidelines. Check scope and whether instructions are enabled.'],
+			['Skills', AICustomizationManagementSection.Skills, 'Reusable task instructions. Review their content before enabling third-party skills.'],
+			['Custom Agents', AICustomizationManagementSection.Agents, 'Specialized agent roles and allowed tools.'],
+			['Prompt Templates', AICustomizationManagementSection.Prompts, 'Reusable prompts for repeated workflows.'],
+			['Hooks', AICustomizationManagementSection.Hooks, 'Automation may execute commands. Inspect scripts and permissions before enabling.'],
+			['MCP Servers', AICustomizationManagementSection.McpServers, 'External tool integrations. Credentials, trust and server startup are managed separately.'],
+		] as const) {
+			const card = DOM.append(this.content, DOM.$('.gozapp-card'));
+			this.button(card, label, () => run(AICustomizationManagementCommands.OpenEditor, section));
+			DOM.append(card, DOM.$('p', undefined, description));
+		}
+		this.button(this.content, 'Add MCP server', () => run(McpCommandIds.AddConfiguration));
+		this.button(this.content, 'MCP server status / start / stop', () => run(McpCommandIds.ListServer));
+		DOM.append(this.content, DOM.$('p', undefined, 'No server is started and no permission is granted by opening this page. Available customizations depend on the active agent/session.'));
+	}
+
 	private showAgents(): void {
 		this.heading('Agents & Chat', 'Use your configured model in Chat. Agent needs a model that supports tool calling.');
+		DOM.append(this.content, DOM.$('p', undefined, 'Side Chat: type a question in the chat input, then select Ask in Side Chat from the input toolbar or Command Palette. It sends the draft to a separate conversation; the main request can continue. Provider support is required and API usage may be billed. If creation fails, the draft is restored when the input is still empty.'));
+		const queueCard = DOM.append(this.content, DOM.$('.gozapp-card'));
+		DOM.append(queueCard, DOM.$('h2', undefined, 'Messages while Agent is working'));
+		const queueLabel = DOM.append(queueCard, DOM.$('label.gozapp-field'));
+		DOM.append(queueLabel, DOM.$('span', undefined, 'Enter key behavior'));
+		const queueMode = DOM.append(queueLabel, DOM.$<HTMLSelectElement>('select'));
+		DOM.append(queueMode, DOM.$('option', { value: 'queue' }, 'Queue — wait until the current request finishes'));
+		DOM.append(queueMode, DOM.$('option', { value: 'steer' }, 'Steer — send at the next opportunity'));
+		const queueHelp = DOM.append(queueCard, DOM.$('p', { role: 'status' }));
+		const refreshQueue = () => {
+			queueMode.value = this.configuration.getValue<string>(ChatConfiguration.RequestQueueingDefaultAction) === 'queue' ? 'queue' : 'steer';
+			queueHelp.textContent = queueMode.value === 'queue'
+				? 'While working: Enter queues; Alt+Enter steers. When idle, input sends normally. Steering support depends on the active agent.'
+				: 'While working: Enter steers; Alt+Enter queues. When idle, input sends normally. Steering support depends on the active agent.';
+		};
+		refreshQueue();
+		this.page.add(this.configuration.onDidChangeConfiguration(event => {
+			if (event.affectsConfiguration(ChatConfiguration.RequestQueueingDefaultAction)) { refreshQueue(); }
+		}));
+		this.page.add(DOM.addDisposableListener(queueMode, 'change', async () => {
+			queueMode.disabled = true;
+			try {
+				await this.configuration.updateValue(ChatConfiguration.RequestQueueingDefaultAction, queueMode.value, ConfigurationTarget.USER);
+				refreshQueue();
+			} catch {
+				refreshQueue();
+				queueHelp.textContent = 'Unable to save message queue preference.';
+			} finally { queueMode.disabled = false; }
+		}));
 		this.button(this.content, 'Open Chat / Agent', () => this.commands.executeCommand('workbench.action.chat.open'));
 		DOM.append(this.content, DOM.$('p', undefined, 'Progress: “Finished with steps” completes a section, not necessarily the task. “Subagent running” means delegated work is pending: expand its step to inspect it. MCP “Start it now?” requires your permission. Use Stop to cancel; inspect pending file changes before retrying.'));
 		const status = DOM.append(this.content, DOM.$('p', { role: 'status' }));
@@ -142,6 +341,21 @@ class GozappSettingsEditor extends EditorPane {
 				status.textContent = 'Profile instructions created/opened. Existing customizations are preserved. Start a new chat and check attached instructions.';
 			} catch { status.textContent = 'Unable to open developer instructions. Existing instructions were not overwritten.'; }
 		});
+		this.button(this.content, 'Review latest Senior instructions template', async () => {
+			try {
+				const editor = await this.editors.openEditor({ resource: undefined, contents: GOZAPP_DEVELOPER_INSTRUCTIONS, languageId: 'markdown', options: { pinned: true } });
+				status.textContent = editor
+					? 'Latest template opened as an unsaved document, not activated. Use Enable / edit Senior Full-stack instructions to open your profile file, compare and merge the rules you want, then save. Start a new chat and verify attached instructions.'
+					: 'Unable to open the latest template. Existing profile instructions were not changed.';
+			} catch { status.textContent = 'Unable to open the latest template. Existing profile instructions were not changed.'; }
+		});
+		DOM.append(this.content, DOM.$('h2', undefined, 'AI Autocomplete'));
+		DOM.append(this.content, DOM.$('p', undefined, 'Optional inline suggestions using a registered provider/model. Off by default; sends bounded context from the active file and may incur API charges. Disable other AI completion providers to avoid duplicates.'));
+		this.button(this.content, 'Select autocomplete provider / model', async () => {
+			try { await this.commands.executeCommand('gozapp.autocomplete.selectModel'); }
+			catch { status.textContent = 'Autocomplete extension is not available. Restart Gozapp and check extensions.'; }
+		});
+		this.button(this.content, 'Autocomplete On / Off and delay', () => this.commands.executeCommand('workbench.action.openSettings', 'gozapp.autocomplete'));
 		this.button(this.content, 'Agent Settings', () => this.commands.executeCommand('workbench.action.openSettings', '@tag:chatAgent'));
 		DOM.append(this.content, DOM.$('p', undefined, 'Review file changes and terminal commands before approval. Cloud agents, Cursor Tab and Cursor indexing are not implemented in Gozapp.'));
 	}
@@ -186,6 +400,28 @@ class GozappSettingsEditor extends EditorPane {
 			for (const id of modelIds) {
 				const row = DOM.append(modelList, DOM.$('.gozapp-model-row'));
 				DOM.append(row, DOM.$('h3', undefined, id));
+				const visibilityRow = DOM.append(row, DOM.$('label.gozapp-toggle'));
+				const visible = DOM.append(visibilityRow, DOM.$<HTMLInputElement>('input', { type: 'checkbox', role: 'switch' }));
+				DOM.append(visibilityRow, DOM.$('span', undefined, 'Show in chat model picker (applies immediately)'));
+				const visibilityNote = DOM.append(row, DOM.$('p'));
+				const identifier = () => selected && this.languageModels.getLanguageModelGroups(selected.vendor)
+					.find(group => group.group?.name === selected.name)?.modelIdentifiers
+					.find(identifier => this.languageModels.lookupLanguageModel(identifier)?.id === id);
+				const refreshVisibility = () => {
+					const registered = identifier();
+					visible.disabled = !registered || !canHideModel(registered, this.languageModels.lookupLanguageModel(registered));
+					visible.checked = !!registered && !this.languageModels.isModelHidden(registered);
+					visibilityNote.textContent = !registered ? 'Save/register this model first to change visibility.'
+						: visible.disabled ? 'This model cannot be hidden.' : 'Agent still requires tool calling. Visibility does not change model capabilities.';
+				};
+				modelRows.add(DOM.addDisposableListener(visible, 'change', () => {
+					const registered = identifier();
+					if (registered) { this.languageModels.setModelHidden(registered, !visible.checked); }
+					refreshVisibility();
+				}));
+				modelRows.add(this.languageModels.onDidChangeModelVisibility(refreshVisibility));
+				modelRows.add(this.languageModels.onDidChangeLanguageModels(refreshVisibility));
+				refreshVisibility();
 				const limit = limits.get(id)!;
 				const input = this.field(row, `${id} — Max input tokens`, limit.input, 'number', modelRows);
 				const output = this.field(row, `${id} — Max output tokens`, limit.output, 'number', modelRows);
@@ -217,6 +453,76 @@ class GozappSettingsEditor extends EditorPane {
 			renderModels();
 		});
 		const status = DOM.append(this.content, DOM.$('p', { role: 'status', 'aria-live': 'polite' }));
+		this.button(this.content, 'Check saved model registration (no API request)', () => {
+			DOM.clearNode(diagnostics);
+			if (!selected) {
+				status.textContent = 'Save the provider first. This check uses saved settings, not unsaved edits.';
+				return;
+			}
+			const group = this.languageModels.getLanguageModelGroups(selected.vendor).find(group => group.group?.name === selected.name);
+			status.textContent = 'Local registration only: this does not verify credentials, connectivity, streaming or actual tool support.';
+			for (const configured of existingModels) {
+				const model = group?.modelIdentifiers.map(id => this.languageModels.lookupLanguageModel(id)).find(model => model?.id === configured.id);
+				const detail = model
+					? `Registered · ${ILanguageModelChatMetadata.suitableForAgentMode(model) ? 'Agent capable (declared)' : 'Ask only'} · input ${model.maxInputTokens} · output ${model.maxOutputTokens} · ${model.isUserSelectable === false ? 'not selectable' : 'selectable'}${this.languageModels.isGroupHidden(selected.vendor, selected.name) ? ' · provider hidden in picker' : ''}`
+					: 'Not registered yet. Check AI extension activation and provider errors in Output; save/reload if configuration was just changed.';
+				DOM.append(diagnostics, DOM.$('p', undefined, `${String(configured.id)}: ${detail}`));
+			}
+		});
+		const diagnostics = DOM.append(this.content, DOM.$('div', { role: 'status', 'aria-live': 'polite' }));
+		if (selected) {
+			const probeControls = DOM.append(this.content, DOM.$('.gozapp-card'));
+			DOM.append(probeControls, DOM.$('h3', undefined, 'Test saved model connection'));
+			const picker = DOM.append(probeControls, DOM.$<HTMLSelectElement>('select', { 'aria-label': 'Model to test' }));
+			for (const model of existingModels) {
+				DOM.append(picker, DOM.$('option', { value: String(model.id) }, String(model.id)));
+			}
+			let cancelProbe: (() => void) | undefined;
+			let disposed = false;
+			this.page.add(toDisposable(() => { disposed = true; cancelProbe?.(); }));
+			const probeStatus = DOM.append(probeControls, DOM.$('p', { role: 'status', 'aria-live': 'polite' }));
+			const test = this.button(probeControls, 'Test connection (uses API tokens)', async () => {
+				test.enabled = false;
+				try {
+					const modelId = picker.value;
+					const group = this.languageModels.getLanguageModelGroups(selected.vendor).find(group => group.group?.name === selected.name);
+					const identifier = group?.modelIdentifiers.find(id => this.languageModels.lookupLanguageModel(id)?.id === modelId);
+					if (!identifier) { probeStatus.textContent = 'Model not registered. Run the local registration check first.'; return; }
+					const consent = await this.dialogs.confirm({ message: `Test ${modelId}?`, detail: 'Sends only “Reply with OK.” using the saved provider and API key. No project content or tools are sent. Provider token charges may apply; configured output limits still apply.', primaryButton: 'Send test request' });
+					if (!consent.confirmed || disposed) { return; }
+					const token = new CancellationTokenSource();
+					let cancelled = false;
+					let timedOut = false;
+					let rejectWait!: (error: Error) => void;
+					const interrupted = new Promise<never>((_, reject) => { rejectWait = reject; });
+					cancelProbe = () => { cancelled = true; token.cancel(); rejectWait(new Error('CANCELLED')); };
+					cancel.enabled = true;
+					probeStatus.textContent = 'Connecting — waiting for first text response…';
+					const timer = setTimeout(() => { timedOut = true; token.cancel(); rejectWait(new Error('TIMEOUT')); }, 30000);
+					const start = Date.now();
+					try {
+						const run = async () => {
+							const response = await this.languageModels.sendChatRequest(identifier, undefined,
+								[{ role: ChatMessageRole.User, content: [{ type: 'text', value: 'Reply with OK.' }] }], {}, token.token);
+							return consumeGozappProbe(response, () => {
+								if (!disposed && !token.token.isCancellationRequested) { probeStatus.textContent = 'Text received — waiting for completion…'; }
+							});
+						};
+						const chunks = await Promise.race([run(), interrupted]);
+						if (!disposed) { probeStatus.textContent = `Completed in ${((Date.now() - start) / 1000).toFixed(1)}s (${chunks} text chunks). Credentials and text response worked. Tool calling and true incremental server streaming are not verified.`; }
+					} catch {
+						if (!disposed) { probeStatus.textContent = timedOut ? 'Timed out after 30s; cancellation requested. Provider may still bill in-flight work.' : cancelled ? 'Cancelled; provider may still bill in-flight work.' : 'Request failed or returned no text. Check provider credentials, endpoint, model ID and TLS in Output. No response or raw error is displayed here to avoid exposing secrets.'; }
+					} finally {
+						clearTimeout(timer); token.dispose(true); cancelProbe = undefined;
+						if (!disposed) { cancel.enabled = false; }
+					}
+				} catch {
+					if (!disposed) { probeStatus.textContent = 'Unable to start the connection test.'; }
+				} finally { if (!disposed) { test.enabled = true; } }
+			});
+			const cancel = this.button(probeControls, 'Cancel test', () => cancelProbe?.());
+			cancel.enabled = false;
+		}
 		const save = this.button(this.content, 'Save provider', async () => {
 			save.enabled = false;
 			let secretId: string | undefined;

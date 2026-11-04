@@ -336,6 +336,9 @@ suite('PlanAgentProvider', () => {
 		assert.ok(content.includes('handoffs:'));
 		assert.ok(content.includes('label: Start Implementation'));
 		assert.ok(content.includes('label: Open in Editor'));
+		assert.ok(content.includes('label: Save to Workspace'));
+		assert.ok(content.includes('.gozapp/plans/plan-'));
+		assert.ok(content.includes('instead of overwriting'));
 		assert.ok(content.includes('agent: agent'));
 		assert.ok(content.includes('send: true'));
 	});

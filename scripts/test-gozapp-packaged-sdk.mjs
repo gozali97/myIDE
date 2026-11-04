@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import { readFileSync, statSync } from 'node:fs';
+import path from 'node:path';
+const extension = process.argv[2] ?? '.build/extensions/copilot';
+const root = path.join(extension, 'node_modules/@github/copilot');
+const source = JSON.parse(readFileSync('extensions/copilot/node_modules/@github/copilot/package.json', 'utf8'));
+const packaged = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
+assert.equal(packaged.version, source.version, 'Packaged SDK version must match extension dependency');
+assert.ok(statSync(path.join(root, 'sdk/index.js')).size > 0, 'SDK entrypoint missing');
+console.log('Packaged Copilot SDK metadata, version and entrypoint verified');

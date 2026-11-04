@@ -6,12 +6,14 @@
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { beforeEach, expect, it, suite, vi } from 'vitest';
+import { IEndpointProvider } from '../../../../../platform/endpoint/common/endpointProvider';
+import { createMockEndpointProvider } from '../../../node/test/searchToolTestUtils';
 import { ITestingServicesAccessor } from '../../../../../platform/test/node/services';
 import { TestWorkspaceService } from '../../../../../platform/test/node/testWorkspaceService';
 import { IWorkspaceService } from '../../../../../platform/workspace/common/workspaceService';
 import { ChatResponseStreamImpl } from '../../../../../util/common/chatResponseStreamImpl';
 import { createTextDocumentData } from '../../../../../util/common/test/shims/textDocument';
-import { CancellationToken } from '../../../../../util/vs/base/common/cancellation';
+import { CancellationToken, CancellationTokenSource } from '../../../../../util/vs/base/common/cancellation';
 import { ResourceSet } from '../../../../../util/vs/base/common/map';
 import { assertType } from '../../../../../util/vs/base/common/types';
 import { URI } from '../../../../../util/vs/base/common/uri';
@@ -33,6 +35,8 @@ suite('ReplaceString Tool', () => {
 
 	beforeEach(function () {
 		const services = createExtensionUnitTestingServices();
+		// Edit unit tests must not fetch live model metadata or require Git LFS caches.
+		services.define(IEndpointProvider, createMockEndpointProvider('test-model'));
 
 		const content = String(readFileSync(path));
 
@@ -62,6 +66,48 @@ suite('ReplaceString Tool', () => {
 			expect(await internal.prepareEdits(options, CancellationToken.None)).toBe(success);
 			expect(await internal.prepareEdits(options, CancellationToken.None)).toBe(success);
 			expect(prepare).toHaveBeenCalledTimes(3);
+		} finally { prepare.mockRestore(); }
+	});
+
+	it('reprepares after cancellation even when preparation returned successful edits', async () => {
+		const tool = accessor.get(IInstantiationService).createInstance(ReplaceStringTool);
+		const internal = tool as unknown as {
+			_prepareEdits: (...args: unknown[]) => Promise<unknown[]>;
+			prepareEdits: (options: unknown, token: typeof CancellationToken.None) => Promise<unknown[]>;
+		};
+		const success = [{ generatedEdit: { success: true, textEdits: [] } }];
+		const cancellation = new CancellationTokenSource();
+		const prepare = vi.spyOn(internal, '_prepareEdits').mockImplementation(async () => {
+			cancellation.cancel();
+			return success;
+		});
+		const options = { input: { filePath: path, oldString: 'old', newString: 'new' } };
+		try {
+			expect(await internal.prepareEdits(options, cancellation.token)).toBe(success);
+			expect(await internal.prepareEdits(options, CancellationToken.None)).toBe(success);
+			expect(prepare).toHaveBeenCalledTimes(2);
+		} finally { cancellation.dispose(); prepare.mockRestore(); }
+	});
+
+	it('an older failed preparation does not evict a newer successful cache entry', async () => {
+		const tool = accessor.get(IInstantiationService).createInstance(ReplaceStringTool);
+		const internal = tool as unknown as {
+			_prepareEdits: (...args: unknown[]) => Promise<unknown[]>;
+			prepareEdits: (options: unknown, token: typeof CancellationToken.None) => Promise<unknown[]>;
+		};
+		let finishOld!: (value: unknown[]) => void;
+		const oldResult = new Promise<unknown[]>(resolve => { finishOld = resolve; });
+		const success = [{ generatedEdit: { success: true, textEdits: [] } }];
+		const prepare = vi.spyOn(internal, '_prepareEdits').mockReturnValueOnce(oldResult).mockResolvedValue(success);
+		const oldOptions = { input: { filePath: path, oldString: 'old', newString: 'first' } };
+		const newOptions = { input: { filePath: path, oldString: 'old', newString: 'second' } };
+		try {
+			const pending = internal.prepareEdits(oldOptions, CancellationToken.None);
+			expect(await internal.prepareEdits(newOptions, CancellationToken.None)).toBe(success);
+			finishOld([{ generatedEdit: { success: false, errorMessage: 'No match' } }]);
+			await pending;
+			expect(await internal.prepareEdits(newOptions, CancellationToken.None)).toBe(success);
+			expect(prepare).toHaveBeenCalledTimes(2);
 		} finally { prepare.mockRestore(); }
 	});
 

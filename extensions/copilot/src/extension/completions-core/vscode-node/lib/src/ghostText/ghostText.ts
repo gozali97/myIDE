@@ -2,6 +2,7 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+import { commands, window, workspace } from 'vscode';
 import { CopilotNamedAnnotationList } from '../../../../../../platform/completions-core/common/openai/copilotAnnotations';
 import { ILogService, ILogger } from '../../../../../../platform/log/common/logService';
 import { ITelemetryService } from '../../../../../../platform/telemetry/common/telemetry';
@@ -522,6 +523,10 @@ export class GhostTextComputer {
 						return ghostTextStrategy.finishedCb(text, delta);
 					};
 
+					const editor = window.activeTextEditor;
+					const refreshVersion = editor?.document.version;
+					const refreshPosition = editor?.selection.active;
+					const refreshModel = workspace.getConfiguration('gozapp.autocomplete', editor?.document.uri).get<string>('model');
 					const asyncCancellationTokenSource = new CancellationTokenSource();
 					const requestPromise = completionsFromNetwork.getCompletionsFromNetwork(
 						requestContext,
@@ -530,6 +535,18 @@ export class GhostTextComputer {
 						finishedCb,
 						telemetryBuilder,
 					);
+					void requestPromise.then(result => {
+						if (result.type !== 'success' || !cancellationToken?.isCancellationRequested) { return; }
+						// Cache is populated before resolution; refresh only the unchanged editor to consume it.
+						setTimeout(() => {
+							const config = workspace.getConfiguration('gozapp.autocomplete', editor?.document.uri);
+							if (editor && window.activeTextEditor === editor && editor.document.version === refreshVersion
+								&& editor.selection.isEmpty && refreshPosition?.isEqual(editor.selection.active)
+								&& config.get<boolean>('enabled', false) && config.get<string>('model') === refreshModel) {
+								void commands.executeCommand('editor.action.inlineSuggest.trigger', { explicit: false }).then(undefined, () => {});
+							}
+						}, 0);
+					}, () => {});
 					void this.asyncCompletionManager.queueCompletionRequest(
 						ourRequestId,
 						prefix,

@@ -476,11 +476,19 @@ export function packageCopilotExtensionStream(): Stream {
 			.pipe(rename(p => p.dirname = `extensions/copilot/${p.dirname}`))
 	);
 
+	// VSCE's no-dependencies scan omits node_modules; the app-level pruning rules
+	// also remove @github/copilot. The built-in extension still requires its own SDK.
+	const copilotSdkStream = gulp.src([
+		'extensions/copilot/node_modules/@github/copilot/package.json',
+		'extensions/copilot/node_modules/@github/copilot/sdk/**',
+	], { base: '.', dot: true });
+
 	const productionDependencies = getProductionDependencies('extensions/copilot');
 	const dependenciesSrc = productionDependencies.map(d => path.relative(root, d)).map(d => [`${d}/**`, `!${d}/**/{test,tests}/**`]).flat();
 
 	return es.merge(
 		localExtensionsStream,
+		copilotSdkStream,
 		gulp.src(dependenciesSrc, { base: '.' })
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', '.moduleignore')))
 			.pipe(util2.cleanNodeModules(path.join(root, 'build', `.moduleignore.${process.platform}`)))

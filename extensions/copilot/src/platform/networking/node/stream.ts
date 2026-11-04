@@ -34,6 +34,15 @@ class APIJsonDataStreaming {
 			const str = APIJsonDataStreaming._removeCR(choice.delta.content);
 			this._text.push(str);
 			this._newText.push(str);
+		} else if (typeof choice.message?.content === 'string') {
+			// Compatible routers can emit a complete message instead of a delta in SSE.
+			const snapshot = APIJsonDataStreaming._removeCR(choice.message.content);
+			const previous = this._text.join('');
+			if (snapshot.startsWith(previous)) {
+				const str = snapshot.slice(previous.length);
+				this._text.push(str);
+				this._newText.push(str);
+			}
 		}
 		if (choice.delta?.function_call && (choice.delta.function_call.name || choice.delta.function_call.arguments)) {
 			const str = APIJsonDataStreaming._removeCR(choice.delta.function_call.arguments);
@@ -183,7 +192,7 @@ interface ChoiceJSON {
  */
 interface ExtendedChoiceJSON extends ChoiceJSON {
 	content_filter_results?: Record<Exclude<FilterReason, FilterReason.Copyright>, { filtered: boolean; severity: string }>;
-	message?: RawThinkingDelta;
+	message?: RawThinkingDelta & { content?: string | null };
 	delta?: {
 		content: string | null;
 		copilot_annotations?: {
@@ -586,6 +595,18 @@ export class SSEProcessor {
 					const solutionDone = Boolean(choice.finish_reason) || finishOffset !== undefined;
 					if (!solutionDone) {
 						continue;
+					}
+					if (solution.text.join('').length === 0) {
+						// Record only protocol structure, never source, response text or credentials.
+						this.logService.warn(`[LM empty SSE] ${JSON.stringify({
+							messageContentType: typeof choice.message?.content,
+							deltaContentType: typeof choice.delta?.content,
+							messageContentArray: Array.isArray(choice.message?.content),
+							deltaContentArray: Array.isArray(choice.delta?.content),
+							thinkingFound,
+							toolCalls: this.toolCalls.hasToolCalls(),
+							legacyTextCharacters: choice.text?.length ?? 0,
+						})}`);
 					}
 					// NOTE: When there is a finish_reason the text of subsequent chunks is always '',
 					// (current chunk might still have useful text, that is why we add it above).

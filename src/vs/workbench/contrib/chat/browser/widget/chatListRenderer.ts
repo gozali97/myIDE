@@ -3882,14 +3882,19 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 		}
 
 		const keepOpenForFocus = !!focusedContent && nodesToCollapse.some(node => node.contains(focusedContent));
+		// Keep tracked edit history visible after completion; explicit user collapse still wins.
+		const keepEditHistoryOpen = nodesToCollapse.some(node => node instanceof HTMLElement && (
+			node.matches('.chat-codeblock-pill-container') || !!node.querySelector('.chat-codeblock-pill-container, .gozapp-edit-preview')
+		));
 		const shouldAnimateInitialCollapse = animateCollapse
+			&& !keepEditHistoryOpen
 			&& !keepOpenForFocus
 			&& !this.accessibilityService.isMotionReduced()
 			&& templateData.completedResponseDisclosureOpen === undefined;
 		if (keepOpenForFocus) {
 			templateData.completedResponseDisclosureOpen = true;
 		}
-		details.open = templateData.completedResponseDisclosureOpen ?? shouldAnimateInitialCollapse;
+		details.open = templateData.completedResponseDisclosureOpen ?? (keepEditHistoryOpen || shouldAnimateInitialCollapse);
 		const updateExpansionState = () => {
 			summary.setAttribute('aria-expanded', String(details.open));
 			chevron.classList.toggle('expanded', details.open);
@@ -5616,6 +5621,7 @@ export class ChatListItemRenderer extends Disposable implements ITreeRenderer<Ch
 
 	private renderExternalEdit(content: IChatExternalEdit, context: IChatContentPartRenderContext, templateData: IChatListItemTemplate): IChatContentPart {
 		const editPart = this.instantiationService.createInstance(ChatExternalEditContentPart, content, context);
+		templateData.elementDisposables.add(editPart.onDidChangeHeight(() => this.fireItemHeightChange(templateData)));
 		const partId = `externalEdit-${content.uri.toString()}-${content.undoStopId ?? ''}`;
 		if (content.subAgentInvocationId && isResponseVM(context.element)) {
 			const subagentPart = this.getSubagentPart(templateData.renderedParts, content.subAgentInvocationId);

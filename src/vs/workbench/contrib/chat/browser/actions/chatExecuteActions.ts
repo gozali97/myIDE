@@ -273,7 +273,16 @@ class ToggleChatModeAction extends Action2 {
 			category: CHAT_CATEGORY,
 			precondition: ContextKeyExpr.and(
 				ChatContextKeys.enabled,
-				ChatContextKeys.requestInProgress.negate())
+				ChatContextKeys.requestInProgress.negate()),
+			// Cursor-style mode cycling; screen reader users keep Shift+Tab for focus navigation.
+			keybinding: {
+				when: ContextKeyExpr.and(
+					ChatContextKeys.inChatInput,
+					ContextKeyExpr.not('suggestWidgetVisible'),
+					ContextKeyExpr.not('accessibilityModeEnabled')),
+				primary: KeyMod.Shift | KeyCode.Tab,
+				weight: KeybindingWeight.EditorContrib
+			}
 		});
 	}
 

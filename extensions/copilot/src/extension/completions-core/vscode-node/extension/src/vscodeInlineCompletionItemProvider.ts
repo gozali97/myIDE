@@ -100,6 +100,7 @@ export class CopilotInlineCompletionItemProvider extends Disposable implements I
 		context: InlineCompletionContext,
 		token: CancellationToken
 	): Promise<GhostTextCompletionList | undefined> {
+		const byok = workspace.getConfiguration('gozapp.autocomplete', doc.uri).get<boolean>('enabled', false);
 
 		if (context.triggerKind === InlineCompletionTriggerKind.Automatic && env.isMeteredConnection) {
 			return;
@@ -110,7 +111,7 @@ export class CopilotInlineCompletionItemProvider extends Disposable implements I
 			if (!this.instantiationService.invokeFunction(isCompletionEnabledForDocument, doc)) {
 				return;
 			}
-			if (this.extensionStatusService.kind === 'Error') {
+			if (!byok && this.extensionStatusService.kind === 'Error') {
 				return;
 			}
 		}

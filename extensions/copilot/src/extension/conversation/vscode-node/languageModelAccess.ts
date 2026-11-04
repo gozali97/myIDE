@@ -811,10 +811,18 @@ export class CopilotLanguageModelWrapper extends Disposable {
 		// This links the wrapper's chat span back to the original invoke_agent trace.
 		const parentTraceContext = internalModelOptions?._otelTraceContext ?? undefined;
 
+		let streamedCharacters = 0;
+		let thinkingCharacters = 0;
+		let responseCallbacks = 0;
 		const makeRequest = () => endpoint.makeChatRequest2({
 			debugName: requestPurpose ? `copilotLanguageModelWrapper/${requestPurpose}` : 'copilotLanguageModelWrapper',
 			messages,
-			finishedCb: callback,
+			finishedCb: async (text, index, delta) => {
+				streamedCharacters += delta.text?.length ?? 0;
+				thinkingCharacters += delta.thinking?.text?.length ?? 0;
+				responseCallbacks++;
+				return callback(text, index, delta);
+			},
 			location: ChatLocation.Other,
 			source: { extensionId },
 			requestOptions: options,
@@ -867,6 +875,14 @@ export class CopilotLanguageModelWrapper extends Disposable {
 			}
 
 			throw new Error(result.reason);
+		}
+
+		// Some endpoints return a final answer without delivering text deltas.
+		if (streamedCharacters === 0 && result.value) {
+			await callback(result.value, 0, { text: result.value });
+		}
+		if (extensionId === 'gozapp.gozapp-autocomplete') {
+			this._logService.info(`[Gozapp Autocomplete] Response text counts: streamed=${streamedCharacters}, final=${result.value.length}, thinking=${thinkingCharacters}, callbacks=${responseCallbacks}, outputTokens=${result.usage?.completion_tokens ?? 'unknown'}`);
 		}
 
 		this._telemetryService.sendInternalMSFTTelemetryEvent(

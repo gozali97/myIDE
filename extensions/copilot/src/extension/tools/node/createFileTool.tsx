@@ -114,6 +114,9 @@ export class CreateFileTool implements ICopilotTool<ICreateFileParams> {
 			this.sendTelemetry(options.chatRequestId, modelId, fileExtension);
 		} else {
 			const content = removeLeadingFilepathComment(options.input.content, languageId, options.input.filePath);
+			// Use the same tracked edit card as replacements so new files get an inline diff preview.
+			this._promptContext.stream.markdown('\n```\n');
+			this._promptContext.stream.codeblockUri(uri, true);
 			// When the file has been deleted from disk but VS Code still holds a stale
 			// in-memory doc with content, use a full-document replace so the old buffer
 			// is overwritten rather than prepended to (https://github.com/microsoft/vscode/issues/311043).
@@ -124,6 +127,7 @@ export class CreateFileTool implements ICopilotTool<ICreateFileParams> {
 				this._promptContext.stream.textEdit(uri, TextEdit.insert(new ExtPosition(0, 0), content));
 			}
 			this._promptContext.stream.textEdit(uri, true);
+			this._promptContext.stream.markdown('\n```\n');
 			this.sendTelemetry(options.chatRequestId, modelId, fileExtension);
 			return new LanguageModelToolResult([
 				new LanguageModelPromptTsxPart(

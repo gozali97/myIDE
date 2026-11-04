@@ -238,6 +238,8 @@ export class InlineCompletionProviderImpl extends Disposable implements InlineCo
 		context: InlineCompletionContext,
 		token: CancellationToken
 	): Promise<NesCompletionList | undefined> {
+		// Match ghost-text routing: BYOK autocomplete must not trigger Copilot next-edit requests.
+		if (workspace.getConfiguration('gozapp.autocomplete', document.uri).get<boolean>('enabled', false)) { return undefined; }
 		if (context.triggerKind === InlineCompletionTriggerKind.Automatic && env.isMeteredConnection) {
 			return undefined;
 		}
